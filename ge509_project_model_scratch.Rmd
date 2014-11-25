@@ -1,0 +1,32 @@
+# Preliminary modeling for ge509_project
+# basic mean fit
+```{r}
+library(R2WinBUGS)
+library(BRugs)
+init = NULL
+b1 = openbugs(data=data,
+              init=init,
+              model.file="ProjMod1.txt", 
+              n.chains=3,	
+              n.iter=2000,
+              n.burnin=100,
+              n.thin = 2,
+              parameters.to.save=c("mu","prec")  ## parameters we want to track
+)
+quants1 <- apply(b1$sims.matrix,2, quantile, c(0.025, 0.5, 0.975))
+quants1
+
+
+writeDatafileR(DATA = data, towhere = "salt_river")
+
+
+b2 = openbugs(data=data,
+  init=init,
+  model.file="ProjMod2.txt", 
+  n.chains=1,	
+	n.iter=110,
+	n.burnin=1,
+	n.thin = 2,
+	parameters.to.save=c("re","reprec","mu","prec","Ex")  ## parameters we want to track
+)
+```

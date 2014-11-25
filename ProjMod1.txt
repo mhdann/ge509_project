@@ -1,0 +1,11 @@
+model
+{
+    mu ~ dnorm(0.5, 0.001)
+    prec ~ dgamma(0.01, 0.01)
+    for (t in 1:nt) {
+        for (p in 1:np) {
+            norm_gen[t, p] ~ dnorm(mu, prec)
+			Py[t,p] ~ dnorm(mu, prec)
+        }
+    }
+}

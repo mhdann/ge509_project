@@ -1,0 +1,16 @@
+model
+{
+    mu ~ dnorm(0.2, 1)
+    prec ~ dgamma(0.1, 0.1)
+    reprec ~ dgamma(1, 1)
+    for (m in 1:12) {
+        re[m] ~ dnorm(0.00000E+00, reprec)
+    }
+    for (t in 1:nt) {
+        Ey[t] <- mu + re[month[t]]
+        for (p in 1:np) {
+            norm_gen[t, p] ~ dnorm(Ey[t], prec)
+			Py[t,p] ~ dnorm(Ey[t], prec)
+        }
+    }
+}

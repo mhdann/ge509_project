@@ -1,0 +1,21 @@
+model
+{
+    prec ~ dgamma(1, 1)
+	flow.prec ~ dgamma(0.01, 0.01)
+    flow.max.prec ~ dgamma(1, 1)
+    flow.m.prec ~ dgamma(1, 1)
+    for (m in 1:12) {
+        flow.m[m] ~ dnorm(0.00000E+00, flow.m.prec)
+    }
+    for (p in 1:np) {
+        flow.max[p] ~ dlnorm(log(capacity[p]), flow.max.prec)
+    }
+    for (t in 1:nt) {
+        flow[t] ~ dlnorm(flow.m[month[t]], flow.prec)
+        for (p in 1:np) {
+            Ey[t, p] <- min(flow[t], flow.max[p])/flow.max[p]
+            norm_gen[t, p] ~ dnorm(Ey[t, p], prec)
+			Py[t,p] ~ dnorm(Ey[t, p], prec)
+        }
+    }
+}
