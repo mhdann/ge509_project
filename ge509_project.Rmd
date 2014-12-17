@@ -1,32 +1,26 @@
 ---
-title: "GE509 Project - Preliminary Results"
+title: "GE509 Project"
 author: "Michael Dann"
-date: "Saturday, November 13, 2014"
+date: "Wednesday, December 17, 2014"
 output: html_document
 ---
 
-### Goals and Objectives
-Hydroelectric power represents a significant fraction of US power at 7% and a majority fraction of the nation's renewable power at about 55%. In light of a carbon constrained future, it becomes an important starting point to examine any potential effects of climate change on the hydroelectric power supply. In particular, what will changing temperatures and precipitation patterns mean for hydroelectric power? Determining the size of any climate effect on generation (if any) is of interest to planners and policy makers both in terms of carbon pricing and in terms of normative responses.
+## Abstract
+A model to relate flow to hydroelectric generation is developed from an empirical standpoint, rather than the usual operational perspective. The model though simplistic, forms the basis for integration into a larger framework relating climate to hydroelectric generation by way of flow. The more general framework could be considered the previously submitted Bayesian latent flow model, with reparameterization based on parameters from these results. Or the results could serve as an intermediary between generation and an ECM model of flow/climate.
 
-The EIA provides a relatively long data set on the vast majority of the installed capacity in the US (80 gigawatts). The EIA-759 and 906/920 datasets provide a monthly data set from 1970 to 2012 broken by a 5 year period of errant reporting from 1996 to 1999 during which organizational changes at the EIA resulted in annual sampling at some installations rather than monthly; a subset which they do not provide identifying information for. That, combined with climate variable estimates from the GLDAS NOAH model (historical backfit), allows for the estimation of relationships between generation and climate.
+## Introduction
+Hydroelectric power represents a significant fraction of US power at 7% and a majority fraction of the nation's renewable power at about 55%. In light of a carbon constrained future, it becomes an important starting point to examine any potential effects of climate change on the hydroelectric power supply. In particular, what will changing temperatures and precipitation patterns mean for hydroelectric power? Determining the size of climate effect on generation (if any) is of interest to planners and policy makers both in terms of carbon pricing and in terms of normative responses.
 
-I have been working towards a descriptive model of hydroelectric energy generation as a function of weather - precipitation, temperature, drought index (PDSI), surface, ground and total runoff. Previous models of generation proved to be biased in the aggregate, that is OLS relationships (panel/pooled etc) between monthly variables failed to reflect aggregate generation patterns at the yearly level. In-sample predictions by the models estimated on the high frequency data proved to be worse than in-sample estimates based on models from the yearly aggregate variables. This undesired result is quite probably due to the constrained response imposed across the individual units and across time, by panel modeling. Some cursory exploration of the data determined that the more important of the two effects was the temporal error.
+After an initial exploration of the data in a latent streamflow model with somewhat unsatisfactory results, data on actual streamflow was acquired. This has allowed the validation of some of the initial assumptions regarding the relationship between flow and generation. In particular the finding that the minimum flow to generate parameter is probably zero for most dams. Given that there is no minimum flow to generate, the maximimum flow beyond which the damn can no longer generate more power, is estimateable solely from the slope.
 
-This problem lead directly to the next modeling attempt: Hidden Markov Modeling at the individual unit level. This allowed me to specify generation between a high and a low state, each with its own relationship to the covariates, and with transitions in the process model determined by the climate variables. The results of these models has yet to be fully analyzed, however the aggregation error has largely vanished, to be replaced by slightly wider error estimates.
 
-I believe that these higher frequency models are plagued by the nonlinearities introduced by various latent operational constraints: minimum/maximum flow, minimum/maximum reservoir volume, etc, all of which are influenced by some accumulation of runoff and past production. While the runoff and production are both observed, the actual flow and operational constraints are not. However they might be imputed.
+![title](salt_river_stewart_mountain.png)
 
-Now in the Bayesian framework I am attempting to use this latent streamflow to explain the production along waterways with multiple run-of-river dams, those generators lacking storage. I have chosen this particular type of subset in order to weed out as a confounding effect any intradam storage that might occur during the sample window (one month). To this end I am working with the following model:
-
-![title](model_graph_1.png)
-
-Here Y is generation, Z is latent flow, and X represents the covariates. Vector notation indicates that there is a measurement/var for each unit. Notice I have already incorporated one non-linear operational rule here: Zmax represents the maximum amount of flow each unit can handle before the unit utilizes the spillway thereby bypassing the penstock feeding the generators.
+This relationship is illustrated above for the Stewart Mountain Dam. From the image it is clear that the intercept is zero. Given the intercept of zero, and a unit cap (for the normalized monthly generation), max flow may be determined solely from the slope of the relationship. Importantly this means that the max flow parameter may be estimated even for dams for which there are no flow observations over flow max.
 
 ### Read in the Data
-
-Read in the data.
+Reading in the data.
 ```{r, echo=FALSE}
-
 machine <- "mm"
 sim <- 3
 source(file=paste("C:/Users/",machine,"/Dropbox/code/r/load_files.R",sep=""))
@@ -50,20 +44,23 @@ df_data    <- df_gldas_eia[c("time","year","month","plant_code","HUC2","generati
 df_data    <- merge(df_data, df_unit_info[,c("plant_code","drain", "capacity","plant.dam.name")], all.x=T)
 names(df_data)[names(df_data)=="plant.dam.name"] <- "plant name"
 
-plants <- unique(df_data$plant_code)
-plants <- intersect(plants, 145:150) # Salt River dams
 
+salt_river <- c(149, 145, 148, 150)  # Salt River dams
+lower_snake <- c(6175, 3926, 3927,3925) # upstream to downstream
 
-data_prepper <- function(df, plant_codes, upstream_plant_code, blast90s=T){  
+data_prepper <- function(df, plant_codes, run_name, blast90s=T){  
   # Make data conformal, fill in missing with NA
-  
+  library(plyr)  
   data <- list()
   
+  data$run_name <- run_name
   # Determine range of years
   years <- sort(unique(df[df$plant_code%in%plant_codes,"year"])) # years <- 1970:2010  
   
+  data$year <- years
+  
   template <- expand.grid(month = 1:12, year=years, plant_code = plant_codes)
-  df_na <- merge(template, df, by=c("plant_code", "year", "month"),all.x=T)
+  df_na <- join(template, df, by=c("plant_code", "year", "month"))
   
   # Blast 1996-1999 for bad measurements
   if(blast90s){
@@ -73,7 +70,7 @@ data_prepper <- function(df, plant_codes, upstream_plant_code, blast90s=T){
   
     
   # df_NA MUST be ordered by plant_code, year, then month.
-  df_na <- with(df_na,df_na[order(plant_code,year,month),])
+  # should still be sorted after the join.
   
   # rescale data 0 to 1 using generating capacity and length of month
   data$norm_gen <- matrix(data=df_na$generation/max_gen(df_na$month, df_na$capacity), nrow=12*length(years), ncol=length(plant_codes))
@@ -86,74 +83,134 @@ data_prepper <- function(df, plant_codes, upstream_plant_code, blast90s=T){
   
   # data$X
   # covars, currently univariate pulled from most upstream dam
-  data$totrun <- df_na[df_na$plant_code==upstream_plant_code,"totrun"]
+  data$totrun <- df_na[df_na$plant_code==plant_codes[1],"totrun"]
+  data$avsft  <- df_na[df_na$plant_code==plant_codes[1],"avsft"]
   
   # capacity info (for FE)
-  data$capacity <- unique(df_na[,"capacity"])
+  data$capacity <- unique(df_na[,c("capacity","plant_code")])$capacity
   
   # plant order (for FE)
-  data$plants <- unique(df_na[,"plant_code"]) # Here I could have used the "plant_codes" parameter but using these values insures order
+  data$plants <- plant_codes
   
   # For convenience
-  data$plant_names <-unique(as.vector(df_na[df_na[,"plant_code"]%in% plants,"plant name"]))
+  data$plant_names <- as.character(unique(df_na[,c("plant name","plant_code")])[,"plant name"])
   
   data$nt <- 12*length(years)
   data$month <- rep(1:12,data$nt)
-  data$np <- length(plants)
+  data$np <- length(plant_codes)
   data$N  <- data$np*data$nt
   
   return(data)
 }
 
+bind_flow <- function(data, flow){
+  # Make flow conformal to span dataset
+  template <- expand.grid(month = 1:12, year=data$year)
+  flow        <- flow[,c("year_nu","month_nu","mean_va")]
+  names(flow) <- c("year","month","flow")
+  data$z <- join(template, flow, by=c("year","month"))$flow
+  return(data)
+}
+
+sr   <- data_prepper(df_data, plant_codes = salt_river, run_name = "Salt River", blast90s = F)
+ls   <-  data_prepper(df_data, plant_codes = lower_snake, run_name = "Lower Snake", blast90s = F)
+setwd("C:/Users/mm/Dropbox/Coursework/study_projects/dam_modeling/streamflow")
+
+# 09498500 Roosevelt Dam
+# 09502000 below stewart mountain
+# 13343600 below lower granite
+# rd <- read.delim(file = "09498500.txt")
+stewart_mountain <- read.delim(file = "09502000.txt")
+lower_granite <- read.delim(file = "13343600.txt") 
+
+ls <- bind_flow(ls, lower_granite)
+sr <- bind_flow(sr, stewart_mountain)
+
+sub <- subset(df_data, plant_code==sr$plants[4])
+sub$pct_gen <- sub$generation/sub$capacity/720
+
+plot_dam <- function(data,fits, p){
+  # Plot results of mle fit for parameters
+  if(length(fits[[p]]$par) ==3){
+    z.min <- fits[[p]]$par[1]
+    z.max <- fits[[p]]$par[2]
+    mu_x  <- pmin(pmax(data$z-z.min,0),z.max-z.min)/abs(z.max-z.min)
+  }
+  if(length(fits[[p]]$par) ==2){
+    z.max <- fits[[p]]$par[1]
+    mu_x   <- pmin(data$z,z.max)/z.max
+  }  
+  ts.plot(ts(data$z/z.max),ts(mu_x),col=1:2, main=data$plant_names[p])
+    legend("topright",legend=c("Scaled Flow", "Predicted Gen"),col=1:2, lty=c(1,1))
+  ts.plot(ts(data$norm_gen[,p]),ts(mu_x),col=1:2, main=data$plant_names[p])
+  legend("topright",legend=c("Actual", "Predicted"),col=1:2, lty=c(1,1))
+  cor(mu_x, data$norm_gen[,p], "complete.obs")
+}
+
+plot_gen_v_flow <- function(data, fits, p){
+  if(length(p)==1){
+      plot(data$z, data$norm_gen[,p], ylim=c(0,1),xlab="Flow",ylab="Normalized Generation", main=data$plant_names[p])
+      } else {
+        plot(rep(data$z,length(p)), data$norm_gen[,p], ylim=c(0,1),xlab="Flow",ylab="Normalized Generation", main=data$run_name, col=p)
+        legend("bottomright",legend=data$plant_names, lty=rep(1,length(p)), col = p)
+      }
+  if(!is.na(fits)){
+      if(length(fits[[p]]$par)==3){
+         z.max <- sapply(fits, function(x){x$par[2]})
+         z.min <- sapply(fits, function(x){x$par[1]})
+         abline(b = 1/z.max[p], a=-z.min[p]/z.max[p], lty=2)
+         
+      } 
+      if (length(fits[[p]]$par)==2){
+         z.max <- sapply(fits, function(x){x$par[1]})
+         abline(b = 1/z.max[p], a=0, lty=2)
+      }
+    abline(v=z.max[p], lty=2)
+    abline(h = 1)
+    legend("bottomright",legend=c("Spill or Max Flow Estimate"), lty=c(2))
+  }
+} 
 ```
 
-```{r}
-data <- data_prepper(df_data, plant_codes = plants, upstream_plant_code = 149, blast90s = F)
+## Data and Methods
 
-# rescale data using capacity and length of month
-plant = 149 # Roosevelt Dam on the Salt River, East of Phoenix
-sub <- subset(df_data, plant_code==plant)
-sub$pct_gen <- sub$generation/max_gen(month = sub$month , capacity = df_unit_info$capacity[df_unit_info$plant_code==plant])
-```
+The EIA has a relatively long data set on the vast majority of the installed capacity in the US (80 gigawatts). The EIA-759 and 906/920 datasets provide a monthly data set from 1970 to 2012 broken only by a 5 year period of errant reporting from 1996 to 1999 during which organizational changes at the EIA resulted in annual sampling at some installations rather than monthly; a subset which they do not provide identifying information for. That, combined with climate variable estimates from the GLDAS NOAH model (historical backfit), allows for the estimation of relationships between generation and climate. The USGS has streamflow data for various periods, scales, and locations.
 
-### About the Data and the model
+|     Source |   Variables |  Spatial Scale | Frequency|
+|---------:|------------:|--------:|------------:|
+| EIA 759, 906/920  |   Generation, Capacity| Point Referenced|    Monthly|
+| NOAH  |   Runoff, Temperature | Block Referenced|    Monthly|
+| USGS  | Streamflow| Point Referenced |    Monthly (Daily)|
+| Manual| Streamflow| Directed Graph |    NA |
+
+
+There are multiple alignment issues with the data. They have been ignored due to time and processing constraints (estimated at maybe a week).
+
+The block referenced data is overlayed to the point data. The point data is sometimes linked with the directed graph indicating the direction of streamflow and order of dams.
+
+
+### About the Data and the models
 
 For my case example four dams on the Salt River (ENE of Phoenix) are analyzed. They span 30 or so miles along the Salt River just below the Theodore Roosevelt Lake impoundment at the Roosevelt dam (not to be confused with the Franklin Roosevelt Lake in Washington).
 
-In this case generation has been scaled between the theoretical maximum of generation over the length of the month, and zero.
+The generation has been scaled between the theoretical maximum of generation over the length of the month, and zero.
 
-```{r}
-par(mfrow=c(1,2))
-hist(sub$pct_gen, main=NA, xlab="Percent of Maximum Generation")
-ts.plot(sub$pct_gen, ylab="Percent of Maximum Generation", xlab="Month")
-title("Generation at Roosevelt Dam",outer=T)
-```
+Based on plots (not shown) of scaled generation, it can be seen that with only a handful of exceptions, the data is clearly bound between zero and one. More importantly the data *should* be bound between zero and one because the dams in the sample have no significant pumped storage (the lower bound should be zero) and the installed capacity has never changed (the upper bound should be one). Here I shall be clipping the estimates between zero and one. How exactly to bound the data without biasing the results is a question I hope to address, but there is a physical basis for doing so.
 
-```{r,echo=F}
-par(mfrow=c(1,1))
-```
+For another physical constraint, based on the literature many dams share flow with little to no ability to store water intertemporally. It is at this point in the original analysis that the decision was made to construct flow as a latent variable in a hierarchical model.
 
-Observe the two plots of scaled generation at Roosevelt Dam. It can be seen that with only a handful of exceptions, the data is clearly bound between zero and one. More importantly the data *should* be bound between zero and one because Roosevelt has no pumped storage (the lower bound should be zero) and the installed capacity has never changed (the upper bound should be one). Here I shall be clipping the estimates between zero and one. How exactly to bound the data without biasing the results is a question I hope to address, but there is a physical basis for doing so.
+Flow: $z = f(\text{price}, \text{temperature}, \text{runoff})$ with $z > 0$.
 
-```{r}
-# Plot clipped data
-ts.plot(data$norm_gen, col=1:4, xlab="Month", ylab="Normalized Generation", main="Salt River Dams")
-legend("topright",legend=data$plant_names, col=1:4, lty=c(1,1,1,1))
-```
-
-For another physical component, based on the literature many dams share flow with no ability to store water intertemporally. Therefore it may be easier to construct a flow variable and use flow to inform production on the dams. This is a type of hierachical model we went over in lecture 18. I believe this is equivalent to a continuous latent state model.
-
-Flow $z = f(\text{price}, \text{temperature}, \text{runoff})$ with $z > 0$.
-
-Further, physical constraints on the amount of flow that can be converted into generation, will vary by dam:
+The physical constraints on the amount of flow that can be converted into generation, the "flow parameters," will vary by dam:
 
 Generation $Y_i = f_i(Z)$, where $f_i$ is non-linear in $Z$. That is $Y_i=1$ for $Z > Zmax_i$. $Y_i=0$ for $Z\leq Zmin_i$, with the slope of $\frac{1}{Zmax_i-Zmin_i}$ between.
 
 ```{r}
 # Example
+par(mfrow=c(1,2), oma=c(0,0,2,0))
 Z     <- (1:1000)/10
-Z_min <- runif(4, min = 0, max = 20)
-Z_max <- runif(4, min = 40, max = 100)
+Z_min <- runif(4, min = 0, max = 10)
+Z_max <- runif(4, min = 30, max = 50)
 Y     <- matrix(data = 0, nrow=4, ncol=1000)
 for(i in 1:4){
   for(j in 1:1000){
@@ -168,207 +225,138 @@ for(i in 1:4){
     }    
   }
 }
-plot(Z, Y[1,], type="l", xlab="Flow", ylab="Generation", main="Constraints on process")
+plot(Z, Y[1,], type="l", xlab="Flow", ylab="Normalized Generation", main="Pseudodata")
 lines(Z, Y[2,], col=2)
 lines(Z, Y[3,], col=3)
 lines(Z, Y[4,], col=4)
 legend("bottomright", legend=paste("Sample Dam",1:4), col=1:4, lty=c(1,1,1,1))
+
+plot_gen_v_flow(sr,fits=NA,p=1:4)
+
+```
+
+```{r,echo=F}
+par(mfrow=c(1,1), oma=c(0,0,0,0))
 ```
 
 With the type of model demonstrated above, this allows dams to exhibit strong correlation in certain flow ranges, but for the relationship to decouple after the dams have exceeded or underflowed its flow-to-generation capacity.
 
-### First and second fits: Grand mean and Basic RE
+### A Change of Tack, Flow Parameter MLE
 
-For the first foray into Bayesian fits, I tried to fit a grand mean to these four units on the Salt-River. The data model used here is normal. Given that the data is bounded between 0 and 1, a normal error is most certainly not correct. But for the sake of brevity, I used it.
+During the prelimnary results, this hierarchical latent flow model is estimated in the Bayesian context using an MCMC. While the model did converge, the uncertainty on flow and flow parameters rendered the results essentially useless. With the availability of streamflow information (for select dams) a latent model is painfully superfluous in estimating flow parameters. More to the point, the streamflow information may be used directly to estimate the flow parameters.
 
-```{r}
-library(rjags)
-library(coda)
-
-init = NULL
-j1mod <- jags.model("ProjMod1.txt",n.chains = 3, n.adapt = 100, data = data, inits = init)
-j1    <- coda.samples(model = j1mod,
-                      variable.names = c("Py","mu", "prec"),
-                      n.iter = 10000, thin = 10)
-quants1 <- apply(as.matrix(j1),2, quantile, c(0.025, 0.5, 0.975))
-```
-
-Which quite accurately estimates the mean.
 
 ```{r}
-quants1[,c("mu","prec")]
-mean(data$norm_gen,na.rm=T)
-```
-
-However, the PI and CI are somewhat lacking in defintion:
-
-```{r,echo=FALSE}
-plot_grand_mean<-function(data,quants){
-  py1 <- paste0("Py[",1:data$nt,",",1,"]")
-  
-  plot(1:data$nt,data$norm_gen[,1], ylim=c(-1,2), ylab="Normalized Generation",xlab="Month",main="CI/PI")
-  points(1:data$nt,data$norm_gen[,2])
-  points(1:data$nt,data$norm_gen[,3])
-  points(1:data$nt,data$norm_gen[,4])
-  lines(1:data$nt, rep(quants[2,"mu"],data$nt), col=3, lty=1) # median
-  lines(1:data$nt, rep(quants[1,"mu"],data$nt), col=3, lty=2) # CI
-  lines(1:data$nt, rep(quants[3,"mu"],data$nt), col=3, lty=2) # CI
-  
-  lines(1:data$nt, quants[1,py1], col=2, lty=2) # PI
-  lines(1:data$nt, quants[3,py1], col=2, lty=2) # PI
-  legend("topright",legend = c("Data", "Median","CI","PI"), lty=c(1, 1,2,2), col = c(1,3,3,2))  
+# Single unit ll z.max fit
+f_gen <- function(z.min, z.max, data){
+  pmin(pmax(data$z-z.min,0),z.max-z.min)/abs(z.max-z.min)
 }
 
-plot_dam <- function(data, quants, i, Eis2d=F){
-  if (Eis2d==T){
-      eyi <- paste0("Ey[",  1:data$nt, ",", i, "]")
-    } else {
-      eyi <- paste0("Ey[",  1:data$nt,  "]")
-    }
-  pyi <- paste0("Py[",1:data$nt,",",i,"]")
-  plot(1:data$nt, data$norm_gen[,i], ylim=c(0,1), main=data$plant_names[i], xlab = "Year-month",ylab="Normalized Generation")
-  lines(1:data$nt,data$norm_gen[,i])
-  lines(1:data$nt, quants[2,eyi], col=3) # median
-  lines(1:data$nt, quants[1,eyi], col=3, lty = 2) # CI
-  lines(1:data$nt, quants[3,eyi], col=3, lty = 2) # CI
-  lines(1:data$nt, quants[1,pyi], col=2, lty = 2) # Pi
-  lines(1:data$nt, quants[3,pyi], col=2, lty = 2) # PI
-  legend("topright",legend = c("Data", "Median","CI","PI"), lty=c(1, 1,2,2), col = c(1,3,3,2))
+ll_z <- function(pars,unit, data){
+  z.min  <- pars[1]
+  z.max  <- pars[2]
+  se.max <- pars[3]
+  # mu_x   <- pmin(data$z,z.max)/z.max
+   mu_x   <- f_gen(z.min, z.max, data)
+  -sum(dnorm(x = data$norm_gen[,unit], mean=mu_x, sd=se.max, log=T),na.rm=T)
 }
+run_z_fits <- function(data, lower, upper){
+  fits <- list()
+  for(p in 1:data$np){
+    # zmin is started high and zmax is started low to guarantee convergence
+    fits[[p]] <- optim(par = c(obs_max_z/50, obs_max_z/10,0.1),
+                     lower = lower, upper = upper,
+                     unit=p, method="L-BFGS-B", ll_z, data=data)
+  }
+  return(fits)
+}
+obs_max_z <- max(sr$z,na.rm=T)
+
+# Free parameters
+fits   <- run_z_fits(data = sr,
+                     lower=c(0.001, 0.01,0.001),
+                     upper=c(obs_max_z/10, obs_max_z,1))
+# Force z.min to be zero 
+fits0  <- run_z_fits(data = sr,
+                     lower=c(0.001, 0.01,0.001),
+                     upper=c(0.01, obs_max_z,1))
 ```
+
+## Results
+
+The model is run twice, the second time restricting the minimum flow parameter to be zero. An AIC test is then performed which appears to determine quite conclusively that z.min is indistinguishable from zero.
 
 ```{r}
-plot_grand_mean(data,quants1)
+
+free_ln_likelihood <- sapply(fits,  function(x){x$value})
+zero_ln_likelihood <- sapply(fits0, function(x){x$value})
+z.min_free         <- sapply(fits,  function(x){x$par[1]})
+z.min_zero         <- sapply(fits0, function(x){x$par[1]})
+results <- data.frame(Dam = rep(sr$plant_names,2),Model=c(rep("Free",4), rep("Z.min zero",4)), ln_likelihood=c(free_ln_likelihood, zero_ln_likelihood), AIC = c(2*(3+free_ln_likelihood),2*(2+zero_ln_likelihood)), z.min =round(c(z.min_free, z.min_zero),3))
+results[with(results, order(Dam, Model)),]
 ```
 
-Notice that normality in the data model doesn't fit the data very well.
-
-Next I fit a normal, monthly random effects process model, leaving the normal data model for the time being.
-
-```{r}
-# For initial conditions:
-mu = mean(data$norm_gen, na.rm=T)
-# Get mean by month
-test <- data.frame(mm=rowMeans(data$norm_gen, na.rm=T), month=1:12)
-re = aggregate(test, by=list(test$month), mean, na.rm=T)$mm - mu
-prec = 1
-reprec = 1
-init = list(re=re, mu=mu, prec=prec, reprec =reprec)
-
-# http://www.sumsar.net/blog/2013/06/three-ways-to-run-bayesian-models-in-r/
-# JAGS version
-j2mod <- jags.model("ProjMod2.txt",n.chains = 3, n.adapt = 10000, data = data, inits = init)
-j2    <- coda.samples(model = j2mod,
-                      variable.names = c("Ey","Py","mu", "prec","reprec", "re"),
-                      n.iter = 100000, thin = 100)
-j2.dic<- dic.samples(model = j2mod, variable.names = c("Ey","Py","mu", "prec","reprec", "re"), n.iter = 100000, thin = 100)
-
-quants2 <- apply(as.matrix(j2),2, quantile, c(0.025, 0.5, 0.975))
-```
-
-
-```{r}
-plot_dam(data,quants2,1)
-plot_dam(data,quants2,2)
-plot_dam(data,quants2,3)
-plot_dam(data,quants2,4)
-```
-
-As can be seen in the RE fit, barely any of the major variation is explained through use of monthly random effects. Most of the residiual is sopped up into the data model, yielding a wide PI (red). Also, the PI remains unphysically symmetric, and the PI only covers 95% of all the points, missing rather badly in the specific case of Stewart Mountain.
-
-
-### Third Fit: Latent Flow Hierarchical Model, Monthly RE Flow Process Model, Non-linear Fixed Effects Representing Dam Capacity.
-
-One way to address the bounded nature of the data is to use a bounded data or process model. Specifically it makes physical sense for the generation to be $[0,1]$ and the latent flow to be $[0,\infty]$. I try to a log-normally distributed flow $(0,\infty)$. While strictly speaking it should include zero, the log-normal distribution allows the mathematical convience of pushing normal RE effects into the mean of the flow process, and does get me closer to reality. Keep in mind the ultimate goal here is to replace the normal RE effects with a flow rule that is informed by my climate covariates.
-
-In this case the overall data model is still held to be normal.
-
-Non-linear fixed effects are also added to the model in the form of the aforementioned flow-generation limits (or at least the upperbound). Nameplate generating capacity (C on the chart), is used to inform the distribution for these rules. The reasoning behind this, is that the I suspect dam are built to the capacity of their regular flow.
-
-![title](model_graph_1.png)
-
-```{r}
-# http://www.sumsar.net/blog/2013/06/three-ways-to-run-bayesian-models-in-r/
-# JAGS version
-j3mod <- jags.model("C:/Users/mm/Dropbox/Coursework/2014 Fall/GE509/ge509_project/ProjMod3.txt",n.chains = 3, n.adapt = 10000, data = data, inits = NULL)
-# update(j3mod, 10000)
-j3    <- coda.samples(model = j3mod, variable.names = c("Ey","Py","prec","flow","flow.m", "flow.max"), n.iter = 100000, thin = 100)
-j3.dic<- dic.samples(model = j3mod, variable.names = c("Ey","Py","prec","flow","flow.m", "flow.max"), n.iter = 10000, thin = 100)
-
-quants3 <- apply(as.matrix(j3),2, quantile, c(0.025, 0.5, 0.975))
-
-
-plot_dam(data,quants3, 1, Eis2d = T)
-plot_dam(data,quants3, 2, Eis2d = T)
-plot_dam(data,quants3, 3, Eis2d = T)
-plot_dam(data,quants3, 4, Eis2d = T)
-```
-
-In addition to much tighter errors on both the data model and the random effects portion of the process model, amazingly, I can also estimate the latent flow:
+Provided this conclusion holds true for the broader set of dams, the consequence is to make estimation of z.max tractable even without any flow observations exceeding z.max.
 
 ```{r,echo=FALSE}
-# Flow
-plot_flow<-function(data, quants){
-  flow <- paste0("flow[",1:data$nt,"]") # tracker Var names  
-  plot(1:data$nt, quants[2,flow],xlab="Month",ylab="Latent Flow", type="l")
-  lines(1:data$nt, quants[2,flow],lty=1)
-  lines(1:data$nt, quants[1,flow],lty=2,col=3)
-  lines(1:data$nt, quants[3,flow],lty=2,col=3)
-  legend("topright",legend=c("Median Flow", "CI"), lty=c(1,2), col=c(1,3))
-}
-```
-
-
-```{r}
-plot_flow(data,quants3)
-```
-
-And the latent max flows for the generating rule:
-
-```{r}
-quants3[,paste0("flow.max[",1:4,"]")]
-```
-
-At current I believe the units on both latent flow and latent generation rule are in terms of some scaled version of energy. As in, I believe that flow.max represents the maximimum amount of energy redeemable from the flow, at the indicated dam. The spread on this parameter is very large and I'm at a loss think about how to get the error bars down on this one.
-
-### Comparison
-
-```{r,echo=FALSE}
+data <- sr
 TSS <- sum((unlist(data$norm_gen)-mean(data$norm_gen, na.rm=T))^2, na.rm=T)
-R2 <- c()
-R2[1] <- 0
-
 RSS <- 0
 for(i in 1:4){
-  eyi <- paste0("Ey[",  1:data$nt, "]")
-  RSS <- RSS + sum((data$norm_gen[,i]-quants2[2,eyi])^2, na.rm=T)
+  RSS <- RSS + sum((data$norm_gen[,i]-f_gen(fits0[[i]]$par[1],fits0[[i]]$par[2], data))^2, na.rm=T)
 }
-R2[2] <- 1- RSS/TSS 
-  
+R2 <- 1- RSS/TSS 
 
-RSS <- 0
-for(i in 1:4){
-  eyi <- paste0("Ey[",  1:data$nt, ",", i, "]")
-  RSS <- RSS + sum((data$norm_gen[,i]-quants3[2,eyi])^2, na.rm=T)
-}
-R2[3] <- 1-RSS/TSS
 ```
 
-The DIC difference between the RE, and the latent flow RE is: 
+The hierarchical flow model itself has an R2 of `r R2`.
+
+## Discussion
+
+Of crucial interest is tieing flow to climate parameters. Particularly generating flow rules based on long-run relationships between flow and total runoff (which are essentially storage volume). To that end, consider the following plots.
+
 ```{r}
-diffdic(j3.dic,j2.dic)
+# Flow relation to totrun
+
+ma <- function(x,n,self=0){filter(x,c(self,rep(1/n,n)),sides=1)}
+par(mfrow=c(1,2), oma=c(0,0,2,0))
+# runoff -> flow, contemporeneous
+plot(data$totrun, data$z,xlab = "Runoff", ylab="Flow",xlim=c(0,18),ylim=c(0,3200))
+# Idea: error correction model in this space
+# runoff -> flow, smoothed
+n <- 24
+plot(ma(data$totrun, n), ma(data$z,n), col=data$month, xlab = "Smoothed Runoff", ylab="Smoothed Flow")
+title("Flow v. Runoff", outer=T)
+lines(ma(data$totrun, n)[(n+1):data$nt], ma(data$z,n)[(n+1):data$nt])
+par(mfrow=c(1,1), oma=c(0,0,0,0))
 ```
 
-Which considerably prefers the the latent flow RE model.
+Here there is no obvious relationship between flow and runoff in the contemporaneous plot, and a clear relationship in the `r n`-month smoothed plot.
 
-The model itself has an R2 of `r R2[3]` compared to `r R2[2]` for the simply RE model.
+I believe the meaning is one of a conservation rule. Outflows (flow) less losses (evapotransport, withdrawls) is equal to inflows (runoff). Since losses are unaccounted in my model, they will show up as a decrease in the intercept. The apparently positive artifact in the smoothed runoff plot above is likely an artifact of both snowpack and/or grid alignment. Recall that runoff is only coarsely taken from nearest point, rather than some aggregate over a drainage area.
 
-The high R2 here is a very good fit.
+The conservation rule immediately suggests an error correction model, with present flow being determined by both short-run factors and by the disequilibrium from long-run flow-runoff balance. An ECM is the next rational step in the analysis, which unfortunately I did not have time to do.
 
-### To Come
+Another distinct possibility is insertion into the Bayesian framework from the preliminary work, where some dams could have known (strong prior) z.max parameters, some dams could have known flow, and flow could be backed out at other networked locations. However this is only really considered an improvement over the ECM when dealing with intermediary flow gains/losses between network locations. Since otherwise the added information is superfluous. And since modeling the gains and losses is considerably more error prone than the simpler approach, it seems prudent to try the ECM first. 
 
-Currently I'm seeking input on ways to express the relationship of the covariates (runoff, precip, temp etc) to the flow. I have in mind the idea of creating a linear conservation rule: flow = beta*(past inflow - past outflow) or a non-linear rule as per flow.max above.
+### Temperature relations
 
-Also, I'd like some advice on how to specify the process model so as to include zero (as opposed to log-normal RE for the flow) and to express the data model as being bounded between 0 and 1.
+```{r}
+par(mfrow=c(1,2), oma=c(0,0,2,0))
+plot(ma(data$avsft, 3), ma(data$z,3), col=data$month, main="Three Month Smoothed", xlab="Temperature", ylab="Flow")
+plot(ma(data$avsft, 24), ma(data$z,3), col=data$month, main="24 Month Smoothed", xlab="Temperature", ylab="Flow")
+par(mfrow=c(1,1), oma=c(0,0,0,0))
 
-Those are the two steps I'm stuck on at the moment.
+```
+
+The graphs present the relationship between flow and temperature broken out by month(color) and smoothing scale. Flow increases in the hotter periods, but only on short time scales, which is indistinguishable from seasonal demand. Therefore I do not believe that temperature will contribute to the long-run relationship in an ECM.
+
+
+## Acknowledgements
+
+In particular I would like to thank Prof. Dietze for his help in selecting various models and pointing out pitfalls, as well as Pat Sorensen for his feedback on the process.
+
+## References
+
+All data referenced in the text is identified by series and source explicitly.
+

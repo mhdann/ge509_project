@@ -1,7 +1,8 @@
 model
 {
-    mu ~ dnorm(0.5, 0.001)
-    prec ~ dgamma(0.01, 0.01)
+	# Elementary mean fit. You can ignore this file.
+    mu ~ dnorm(0.5, 0.001)      # Prior: Grand mean
+    prec ~ dgamma(0.01, 0.01)   # Prior: Precision about grand mean
     for (t in 1:nt) {
         for (p in 1:np) {
             norm_gen[t, p] ~ dnorm(mu, prec)
